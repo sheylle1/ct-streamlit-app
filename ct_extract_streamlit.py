@@ -7,12 +7,9 @@ import tempfile
 import zipfile
 from pathlib import Path
 import re
-from fuzzywuzzy import process, fuzz
 import shutil
 from io import BytesIO
-import base64
-import tkinter as tk
-from tkinter import filedialog
+import difflib
 
 # Set page configuration
 st.set_page_config(
@@ -21,19 +18,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
-# --------------------------
-# FOLDER SELECTION FUNCTION
-# --------------------------
-
-def select_folder():
-    """Open a dialog to select a folder"""
-    root = tk.Tk()
-    root.withdraw()  # Hide the main window
-    root.attributes('-topmost', True)  # Bring dialog to front
-    folder_path = filedialog.askdirectory(title="Select Folder with CSV Files")
-    root.destroy()
-    return folder_path
 
 # --------------------------
 # DATA PROCESSING FUNCTIONS
@@ -91,7 +75,7 @@ def process_single_csv(file_path):
         # Process positive controls
         pc_mask = (raw_data.get('Type', '') == 'PC') | (
             'Auto   Interpretation' in raw_data.columns and 
-            raw_data['Auto   Interpretation'].astype(str).str.contains('Positive Control', na=False)
+            raw_data['Auto   Interpretation'].ast(str).str.contains('Positive Control', na=False)
         )
         
         pc_data = raw_data[pc_mask].copy()
@@ -188,7 +172,7 @@ def process_all_csv_files(folder_path, selected_samples):
     }
 
 def match_samples(combined_samples, selected_samples):
-    """Match samples using fuzzy matching"""
+    """Match samples using Python's built-in difflib for fuzzy matching"""
     if combined_samples.empty or 'Name' not in combined_samples.columns:
         return pd.DataFrame()
     
@@ -196,23 +180,19 @@ def match_samples(combined_samples, selected_samples):
     combined_samples['Name_clean'] = combined_samples['Name'].astype(str).str.upper().str.strip()
     selected_clean = [str(s).upper().strip() for s in selected_samples]
     
-    # Perform fuzzy matching
+    # Get all unique clean names from the data
+    all_names = combined_samples['Name_clean'].unique().tolist()
+    
+    # Perform fuzzy matching using difflib
     matched_samples = []
     for episode in selected_clean:
-        # Find the best match
-        best_match = None
-        best_score = 0
+        # Find the best match using difflib
+        matches = difflib.get_close_matches(episode, all_names, n=1, cutoff=0.8)
         
-        for name in combined_samples['Name_clean'].unique():
-            score = fuzz.ratio(episode, name)
-            if score > best_score and score >= 95:  # 95% similarity threshold
-                best_score = score
-                best_match = name
-        
-        if best_match:
+        if matches:
+            best_match = matches[0]
             matched_data = combined_samples[combined_samples['Name_clean'] == best_match].copy()
             matched_data['Episode_Number'] = episode
-            matched_data['Match_Score'] = best_score
             matched_samples.append(matched_data)
     
     if matched_samples:
@@ -244,12 +224,12 @@ with st.sidebar:
     
     st.header("Data Input")
     
-    # Folder selection button
-    if st.button("Select Folder with CSV Files"):
-        folder_path = select_folder()
-        if folder_path:
-            st.session_state.selected_folder = folder_path
-            st.success(f"Selected folder: {folder_path}")
+    # For Streamlit Cloud, use text input for folder path
+    st.info("For Streamlit Cloud, please enter the full path to your folder containing CSV files")
+    folder_path = st.text_input("Folder Path", value="", help="Enter the full path to your folder with CSV files")
+    
+    if folder_path:
+        st.session_state.selected_folder = folder_path
     
     # Display selected folder
     if st.session_state.selected_folder:
@@ -354,7 +334,7 @@ if st.session_state.processed:
         except:
             pass
 else:
-    st.info("Select a folder with CSV files and upload a sample list, then click 'Extract Ct Values' to process.")
+    st.info("Enter a folder path with CSV files and upload a sample list, then click 'Extract Ct Values' to process.")
 
 # Create tabs
 tab1, tab2, tab3 = st.tabs(["Sample Preview", "Positive Controls", "Download"])
