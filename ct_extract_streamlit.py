@@ -50,7 +50,7 @@ def process_single_csv(file_path):
                 raw_data.rename(columns={f"col_{i}": full_header[i]}, inplace=True)
         
         # Identify pathogen columns
-        pathogen_cols = list(range(5, min(21, len(raw_data.columns)), 2))
+        pathogen_cols = list(range(5, min(21, len(raw_data.columns)), 2)
         pathogen_names = [full_header[i] for i in pathogen_cols if i < len(full_header)]
         
         # Create result and Ct column names
@@ -111,65 +111,82 @@ def process_single_csv(file_path):
         st.error(f"Error processing file {file_path}: {str(e)}")
         return None
 
-def process_all_csv_files(folder_path, selected_samples):
-    """Process all CSV files in a folder"""
-    csv_files = glob.glob(os.path.join(folder_path, "**/*.csv"), recursive=True)
-    
-    if not csv_files:
-        raise ValueError("No CSV files found in the selected folder.")
-    
-    all_sample_data = []
-    all_pc_data = []
-    pc_status_list = []
-    not_found_files = []
-    
-    for file_path in csv_files:
-        processed = process_single_csv(file_path)
-        if processed is not None:
-            all_sample_data.append(processed['sample_data'])
-            if not processed['pc_data'].empty:
-                all_pc_data.append(processed['pc_data'])
-            pc_status_list.append({
-                'File': os.path.basename(file_path),
-                'PC_Worked': processed['pc_status'],
-                'Message': "All controls passed" if processed['pc_status'] else "Some controls failed"
-            })
-        else:
-            not_found_files.append(os.path.basename(file_path))
-    
-    # Combine all data
-    combined_samples = pd.concat(all_sample_data, ignore_index=True) if all_sample_data else pd.DataFrame()
-    combined_pc = pd.concat(all_pc_data, ignore_index=True) if all_pc_data else pd.DataFrame()
-    pc_summary = pd.DataFrame(pc_status_list) if pc_status_list else pd.DataFrame()
-    
-    # Clean sample names
-    if 'Name' in combined_samples.columns:
-        combined_samples['Name'] = combined_samples['Name'].astype(str).str.strip()
-    
-    # Match samples
-    filtered_samples = match_samples(combined_samples, selected_samples)
-    
-    # Select relevant columns
-    ct_cols = [col for col in filtered_samples.columns if col.endswith('_Ct')] if not filtered_samples.empty else []
-    selected_cols = ['Name'] + ct_cols
-    if 'Auto   Interpretation' in filtered_samples.columns:
-        selected_cols.append('Auto   Interpretation')
-    
-    # Ensure Source_File is included
-    if 'Source_File' not in selected_cols and 'Source_File' in filtered_samples.columns:
-        selected_cols = ['Source_File'] + selected_cols
-    
-    # Filter to only include available columns
-    available_cols = [col for col in selected_cols if col in filtered_samples.columns]
-    filtered_samples = filtered_samples[available_cols] if available_cols else pd.DataFrame()
-    
-    return {
-        'sample_results': filtered_samples,
-        'pc_details': combined_pc,
-        'pc_summary': pc_summary,
-        'all_pathogens': combined_pc['Pathogen'].unique().tolist() if not combined_pc.empty else [],
-        'not_found_files': not_found_files
-    }
+def extract_zip_and_process(uploaded_zip, selected_samples):
+    """Extract zip file and process all CSV files"""
+    # Create a temporary directory
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        # Save the uploaded zip file
+        zip_path = os.path.join(tmp_dir, "uploaded_files.zip")
+        with open(zip_path, "wb") as f:
+            f.write(uploaded_zip.getvalue())
+        
+        # Extract the zip file
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            zip_ref.extractall(tmp_dir)
+        
+        # Find all CSV files
+        csv_files = []
+        for root, dirs, files in os.walk(tmp_dir):
+            for file in files:
+                if file.endswith('.csv'):
+                    csv_files.append(os.path.join(root, file))
+        
+        if not csv_files:
+            raise ValueError("No CSV files found in the uploaded zip.")
+        
+        all_sample_data = []
+        all_pc_data = []
+        pc_status_list = []
+        not_found_files = []
+        
+        for file_path in csv_files:
+            processed = process_single_csv(file_path)
+            if processed is not None:
+                all_sample_data.append(processed['sample_data'])
+                if not processed['pc_data'].empty:
+                    all_pc_data.append(processed['pc_data'])
+                pc_status_list.append({
+                    'File': os.path.basename(file_path),
+                    'PC_Worked': processed['pc_status'],
+                    'Message': "All controls passed" if processed['pc_status'] else "Some controls failed"
+                })
+            else:
+                not_found_files.append(os.path.basename(file_path))
+        
+        # Combine all data
+        combined_samples = pd.concat(all_sample_data, ignore_index=True) if all_sample_data else pd.DataFrame()
+        combined_pc = pd.concat(all_pc_data, ignore_index=True) if all_pc_data else pd.DataFrame()
+        pc_summary = pd.DataFrame(pc_status_list) if pc_status_list else pd.DataFrame()
+        
+        # Clean sample names
+        if 'Name' in combined_samples.columns:
+            combined_samples['Name'] = combined_samples['Name'].astype(str).str.strip()
+        
+        # Match samples
+        filtered_samples = match_samples(combined_samples, selected_samples)
+        
+        # Select relevant columns
+        ct_cols = [col for col in filtered_samples.columns if col.endswith('_Ct')] if not filtered_samples.empty else []
+        selected_cols = ['Name'] + ct_cols
+        if 'Auto   Interpretation' in filtered_samples.columns:
+            selected_cols.append('Auto   Interpretation')
+        
+        # Ensure Source_File is included
+        if 'Source_File' not in selected_cols and 'Source_File' in filtered_samples.columns:
+            selected_cols = ['Source_File'] + selected_cols
+        
+        # Filter to only include available columns
+        available_cols = [col for col in selected_cols if col in filtered_samples.columns]
+        filtered_samples = filtered_samples[available_cols] if available_cols else pd.DataFrame()
+        
+        return {
+            'sample_results': filtered_samples,
+            'pc_details': combined_pc,
+            'pc_summary': pc_summary,
+            'all_pathogens': combined_pc['Pathogen'].unique().tolist() if not combined_pc.empty else [],
+            'not_found_files': not_found_files,
+            'csv_count': len(csv_files)
+        }
 
 def match_samples(combined_samples, selected_samples):
     """Match samples using Python's built-in difflib for fuzzy matching"""
@@ -215,8 +232,8 @@ if 'not_found_files' not in st.session_state:
     st.session_state.not_found_files = []
 if 'processed' not in st.session_state:
     st.session_state.processed = False
-if 'selected_folder' not in st.session_state:
-    st.session_state.selected_folder = None
+if 'csv_count' not in st.session_state:
+    st.session_state.csv_count = 0
 
 # Sidebar
 with st.sidebar:
@@ -224,16 +241,13 @@ with st.sidebar:
     
     st.header("Data Input")
     
-    # For Streamlit Cloud, use text input for folder path
-    st.info("For Streamlit Cloud, please enter the full path to your folder containing CSV files")
-    folder_path = st.text_input("Folder Path", value="", help="Enter the full path to your folder with CSV files")
-    
-    if folder_path:
-        st.session_state.selected_folder = folder_path
-    
-    # Display selected folder
-    if st.session_state.selected_folder:
-        st.info(f"📁 Selected folder: {st.session_state.selected_folder}")
+    # Use file uploader for CSV files (zip format)
+    st.info("Upload a ZIP file containing all CSV files")
+    uploaded_zip = st.file_uploader(
+        "Upload ZIP file with CSV files:",
+        type=["zip"],
+        help="Create a ZIP file containing all your CSV files and upload it here"
+    )
     
     # Sample list upload
     sample_file = st.file_uploader(
@@ -253,7 +267,7 @@ with st.sidebar:
 st.title("Ct Value Extraction Tool")
 
 # Process files when button is clicked
-if process_btn and st.session_state.selected_folder and sample_file:
+if process_btn and uploaded_zip and sample_file:
     with st.spinner("Processing files..."):
         # Read sample list
         try:
@@ -271,13 +285,14 @@ if process_btn and st.session_state.selected_folder and sample_file:
             selected_samples = sample_df['Episode Number'].tolist()
             
             # Process files
-            results = process_all_csv_files(st.session_state.selected_folder, selected_samples)
+            results = extract_zip_and_process(uploaded_zip, selected_samples)
             
             # Store results in session state
             st.session_state.results = results['sample_results']
             st.session_state.pc_summary = results['pc_summary']
             st.session_state.pc_details = results['pc_details']
             st.session_state.not_found_files = results['not_found_files']
+            st.session_state.csv_count = results['csv_count']
             st.session_state.processed = True
             
             st.success("Processing complete!")
@@ -290,13 +305,6 @@ st.header("Processing Status")
 
 if st.session_state.processed:
     n_processed = len(st.session_state.results) if st.session_state.results is not None else 0
-    
-    # Count CSV files in selected folder
-    if st.session_state.selected_folder:
-        csv_files = glob.glob(os.path.join(st.session_state.selected_folder, "**/*.csv"), recursive=True)
-        n_csv = len(csv_files)
-    else:
-        n_csv = 0
     
     if sample_file:
         try:
@@ -321,9 +329,9 @@ if st.session_state.processed:
             with col1:
                 st.metric("Selected Samples", n_selected)
             with col2:
-                st.metric("CSV Files", n_csv)
+                st.metric("CSV Files Processed", st.session_state.csv_count)
             with col3:
-                st.metric("Processed Samples", n_processed)
+                st.metric("Matched Samples", n_processed)
             
             if missing_samples:
                 st.warning(f"⚠️ {len(missing_samples)} samples not found: {', '.join(list(missing_samples)[:5])}{'...' if len(missing_samples) > 5 else ''}")
@@ -334,7 +342,7 @@ if st.session_state.processed:
         except:
             pass
 else:
-    st.info("Enter a folder path with CSV files and upload a sample list, then click 'Extract Ct Values' to process.")
+    st.info("Upload a ZIP file with CSV files and a sample list, then click 'Extract Ct Values' to process.")
 
 # Create tabs
 tab1, tab2, tab3 = st.tabs(["Sample Preview", "Positive Controls", "Download"])
