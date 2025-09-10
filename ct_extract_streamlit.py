@@ -50,7 +50,7 @@ def process_single_csv(file_path):
                 raw_data.rename(columns={f"col_{i}": full_header[i]}, inplace=True)
         
         # Identify pathogen columns
-        pathogen_cols = list(range(5, min(21, len(raw_data.columns)), 2)
+        pathogen_cols = list(range(5, min(21, len(raw_data.columns)), 2))
         pathogen_names = [full_header[i] for i in pathogen_cols if i < len(full_header)]
         
         # Create result and Ct column names
