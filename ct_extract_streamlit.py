@@ -74,9 +74,9 @@ def process_single_csv(file_path):
         
         # Process positive controls
         pc_mask = (raw_data.get('Type', '') == 'PC') | (
-            'Auto   Interpretation' in raw_data.columns and 
-            raw_data['Auto   Interpretation'].ast(str).str.contains('Positive Control', na=False)
-        )
+    'Auto   Interpretation' in raw_data.columns and 
+    raw_data['Auto   Interpretation'].astype(str).str.contains('Positive Control', na=False)
+)
         
         pc_data = raw_data[pc_mask].copy()
         
