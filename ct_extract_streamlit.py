@@ -189,33 +189,23 @@ def extract_zip_and_process(uploaded_zip, selected_samples):
         }
 
 def match_samples(combined_samples, selected_samples):
-    """Match samples using Python's built-in difflib for fuzzy matching"""
+    """Match samples exactly: Episode Number in sample list must equal Name in CSV data"""
     if combined_samples.empty or 'Name' not in combined_samples.columns:
         return pd.DataFrame()
-    
-    # Clean names
+
+    # Convert both to string and normalize spacing/case
     combined_samples['Name_clean'] = combined_samples['Name'].astype(str).str.upper().str.strip()
-    selected_clean = [str(s).upper().strip() for s in selected_samples]
-    
-    # Get all unique clean names from the data
-    all_names = combined_samples['Name_clean'].unique().tolist()
-    
-    # Perform fuzzy matching using difflib
-    matched_samples = []
-    for episode in selected_clean:
-        # Find the best match using difflib
-        matches = difflib.get_close_matches(episode, all_names, n=1, cutoff=0.8)
-        
-        if matches:
-            best_match = matches[0]
-            matched_data = combined_samples[combined_samples['Name_clean'] == best_match].copy()
-            matched_data['Episode_Number'] = episode
-            matched_samples.append(matched_data)
-    
-    if matched_samples:
-        return pd.concat(matched_samples, ignore_index=True)
-    else:
-        return pd.DataFrame()
+    selected_clean = pd.Series([str(s).upper().strip() for s in selected_samples], name="Episode_Number")
+
+    # Merge exact matches
+    matched_data = combined_samples.merge(
+        selected_clean.to_frame(),
+        left_on="Name_clean",
+        right_on="Episode_Number",
+        how="inner"
+    )
+
+    return matched_data if not matched_data.empty else pd.DataFrame()
 
 # --------------------------
 # STREAMLIT UI
